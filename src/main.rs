@@ -12,7 +12,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 fn process_reader<T>(transcactions : T)
     where
-    T : Iterator<Item = Transaction> 
+    T : Iterator<Item = Box<dyn Transaction>> 
 {
     for t in transcactions {
         
