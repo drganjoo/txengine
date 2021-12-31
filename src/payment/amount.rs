@@ -1,3 +1,4 @@
+use core::str::FromStr;
 use std::fmt;
 use core::ops::{Add, SubAssign, Deref, DerefMut, AddAssign};
 use serde::{Serialize};
@@ -67,5 +68,14 @@ impl Serialize for Amount {
         S: Serializer
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl FromStr for Amount {
+    type Err = std::num::ParseFloatError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> { 
+        let amount = value.parse::<f32>()?;
+        Ok(Amount::new(amount))
     }
 }

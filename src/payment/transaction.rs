@@ -1,4 +1,7 @@
-use serde::de::{self, Deserialize, Deserializer, Visitor, SeqAccess, MapAccess};
+use core::str::FromStr;
+use std::fmt::Debug;
+use serde::de::{self, Deserializer, Visitor, MapAccess};
+use serde::{Deserialize};
 
 pub type ClientId = u16;
 pub type TransactionId = u32;
@@ -31,11 +34,33 @@ impl Transaction {
     }
 }
 
+fn parse_next<'a, V, T>(map: &mut V) -> Result<Option<T>, V::Error>
+where
+    V: MapAccess<'a>,
+    T: std::str::FromStr,
+    <T as FromStr>::Err : std::fmt::Display
+{
+    let amount_str = map.next_value::<&str>()?.trim();
+    let amount = amount_str.parse::<T>()
+        .map_err(|e| de::Error::invalid_value(
+            serde::de::Unexpected::Other(&format!("Cannot parse {} as {}", amount_str, e)), 
+            &"a positive number"))?;
+
+    Ok(Some(amount))
+}
+
 impl<'a> Deserialize<'a> for Transaction {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> 
         where D: Deserializer<'a> 
     { 
-        // enum Field { TransactionType, Client, Id, Amount }
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field { 
+            Type,
+            Client, 
+            Tx, 
+            Amount 
+        }
 
         struct TransactionVisitor;
 
@@ -43,47 +68,63 @@ impl<'a> Deserialize<'a> for Transaction {
             type Value = Transaction;
             
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> { 
-                formatter.write_str("struct Transaction")
+                formatter.write_str("map")
             }
 
-            fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
-                where
-                    V: SeqAccess<'a>
+            fn visit_map<V>(self, mut map: V) -> Result<Transaction, V::Error>
+            where
+                V: MapAccess<'a>,
             {
-                let transaction_type = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let client = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let tx = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
-                let amount  : &str = seq.next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(3, &self))?;
-                
-                let amount_parsed = amount.trim().parse()
-                    .or_else(|e| Err(de::Error::invalid_value(serde::de::Unexpected::Other(amount), &"a floating point value")))?;
-                if amount_parsed < 0.0 {
-                    return Err(de::Error::invalid_value(
-                                serde::de::Unexpected::Float(amount_parsed as f64), 
-                                &"a positive number"));
+                let mut transaction_field : Option<&str> = None;
+                let mut client_field : Option<ClientId> = None;
+                let mut tx_id_field : Option<TransactionId> = None;
+                let mut amount_field : Option<Amount> = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Type => {
+                            transaction_field = map.next_value()?;
+                        },
+                        Field::Client => {
+                            client_field = parse_next(&mut map)?;
+                        },
+                        Field::Tx => {
+                            tx_id_field = parse_next(&mut map)?;
+                        },
+                        Field::Amount => {
+                            amount_field = parse_next(&mut map)?;
+                        },
+                    }
                 }
-    
-                let transaction_amount = Amount::new(amount_parsed);
+                
+                let txn_type = transaction_field.ok_or(de::Error::missing_field("type"))?;
+                let client = client_field.ok_or(de::Error::missing_field("client"))?;
+                let tx_id = tx_id_field.ok_or(de::Error::missing_field("tx"))?;
+
+                let transaction = match txn_type{
+                    "withdrawal" | "deposit" => {
+                        let amount = amount_field.ok_or(de::Error::missing_field("amount"))?;
+                        if *amount < 0.0 {
+                            return Err(de::Error::invalid_value(
+                                        serde::de::Unexpected::Float(*amount as f64), 
+                                        &"a positive number"));
+                        }
             
-                let transaction = match transaction_type{
-                    "deposit" => {
-                        Transaction::new(client, tx, TransactionType::Deposit { amount: transaction_amount })
-                    },
-                    "withdrawal" => {
-                        Transaction::new(client, tx, TransactionType::Withdrawal { amount: transaction_amount })
+                        if txn_type == "deposit" {
+                            Transaction::new(client, tx_id, TransactionType::Deposit { amount: amount })
+                        }
+                        else {
+                            Transaction::new(client, tx_id, TransactionType::Withdrawal { amount: amount })
+                        }
                     },
                     "dispute" => {
-                        Transaction::new(client, tx, TransactionType::Dispute)
+                        Transaction::new(client, tx_id, TransactionType::Dispute)
                     },
                     "resolve" => {
-                        Transaction::new(client, tx, TransactionType::Resolve)
+                        Transaction::new(client, tx_id, TransactionType::Resolve)
                     },
                     "chargeback" => {
-                        Transaction::new(client, tx, TransactionType::ChargeBack)
+                        Transaction::new(client, tx_id, TransactionType::ChargeBack)
                     },
                     invalid_type => {
                         return Err(de::Error::invalid_value(
