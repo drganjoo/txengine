@@ -4,7 +4,8 @@ use std::io;
 mod payment;
 mod readers;
 
-use payment::{Transaction, TransactionEngine};
+use payment::transaction::{Transaction};
+use payment::TransactionEngine;
 use readers::{CsvFileReader};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

@@ -1,6 +1,8 @@
 use csv::{Reader, StringRecordsIter, StringRecord};
 use std::fs::File;
-use crate::payment::{Transaction, TransactionType, ClientId, TransactionId, Amount};
+
+use crate::payment::transaction::{Transaction, TransactionType, ClientId, TransactionId};
+use crate::payment::amount::Amount;
 
 pub struct CsvFileReader {
     reader : Reader<File>,
