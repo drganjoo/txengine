@@ -124,8 +124,67 @@ impl ClientBalance {
         self.available + self.held
     }
 
-    pub fn deposit(&mut self, amount: Amount) {
+    pub fn deposit(&mut self, amount: Amount)  -> crate::Result<()> {
+        self.check_locked()?;
         self.available += amount;
+        Ok(())
+    }
+
+    pub fn withdrawal(&mut self, amount: Amount) -> crate::Result<()> {
+        self.check_locked()?;
+        if self.available < amount {
+            return Err("Balance is less than the requested withdrawal amount".into());
+        }
+
+        self.available -= amount;
+        Ok(())
+    }
+
+    pub fn dispute(&mut self, amount: Amount) -> crate::Result<()> {
+        self.check_locked()?;
+
+        if self.available < amount {
+            return Err("Insufficient amount available to dispute".into());
+        }
+
+        self.available -= amount;
+        self.held += amount;
+
+        Ok(())
+    }
+
+    pub fn resolve(&mut self, amount: Amount) -> crate::Result<()> {
+        self.check_locked()?;
+
+        if self.held < amount {
+            return Err("Insufficient amount is held to resolve the dispute".into());
+        }
+
+        self.available += amount;
+        self.held -= amount;
+    
+        Ok(())
+    }
+
+
+    pub fn chargeback(&mut self, amount: Amount) -> crate::Result<()> {
+        self.check_locked()?;
+
+        if self.held < amount {
+            return Err("Insufficient amount is held to chargeback the dispute".into());
+        }
+
+        self.held -= amount;
+        self.locked = true;
+        
+        Ok(())
+    }
+
+    fn check_locked(&self) -> crate::Result<()> {
+        if self.locked {
+            return Err("Customer account is locked and transaction cannot be applied".into());
+        }
+        Ok(())
     }
 }
 
@@ -166,7 +225,6 @@ pub struct TransactionEngine {
     ledger: HashMap<ClientId, ClientLedger>
 }
 
-
 impl TransactionEngine {
     pub fn new() -> Self {
         TransactionEngine {
@@ -200,56 +258,44 @@ impl TransactionEngine {
 
         match &transaction.txn_type {
             TransactionType::Deposit { amount } => {
-                balance.deposit(*amount);
+                balance.deposit(*amount)?;
 
                 ledger.transactions.insert(transaction.tx, *amount);
                 println!("{}: deposited: {}, total: {}", transaction.client, amount, balance.total());
             },
-            _ => {
+            TransactionType::Withdrawal { amount } => {
+                balance.withdrawal(*amount)?;
 
-            }
-            // TransactionType::Withdrawal { amount } => {
-            //     if balance.available < amount {
-            //         return Err("Balance is less than the requested withdrawal amount".into());
-            //     }
-
-            //     balance.available -= amount;
-            //     ledger.transactions.insert(transaction.tx, amount);
-            //     println!("{}: withdrawal: {}, total: {}", transaction.client, amount, balance.total());
-            // },
-            // TransactionType::Dispute => {
-            //     // If the tx specified by the dispute doesn't exist you can ignore it and 
-            //     // assume this is an error on our partners side.
-            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
-            //         // that the clients available funds should decrease by the amount disputed, 
-            //         // their held funds should increase by the amount disputed,
-            //         balance.available -= *amount;
-            //         balance.held += *amount;
-
-            //         println!("{}: dispute amount: {}, total: {}", transaction.client, amount, balance.total());
-            //     }
-            //     else {
-            //         println!("transaction ID {} not found for customer {}", transaction.tx, transaction.client);
-            //     }
-            // },
-            // TransactionType::Resolve => {
-            //     // Funds that were previously disputed are no longer disputed. 
-            //     // This means that the clients held funds should decrease by the amount no longer disputed,
-            //     // their available funds should increase by the amount no longer disputed                
-            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
-            //         balance.available += *amount;
-            //         balance.held -= *amount;
-            //     }
-            // },
-            // TransactionType::ChargeBack => {
-            //     // A chargeback is the final state of a dispute and represents the client reversing a transaction. 
-            //     // Funds that were held have now been withdrawn. This means that the clients held funds and total funds 
-            //     // should decrease by the amount previously disputed.
-            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
-            //         balance.held -= *amount;
-            //         balance.locked = true;
-            //     }
-            // },
+                ledger.transactions.insert(transaction.tx, *amount);
+                println!("{}: withdrawal: {}, total: {}", transaction.client, amount, balance.total());
+            },
+            TransactionType::Dispute => {
+                // If the tx specified by the dispute doesn't exist you can ignore it and 
+                // assume this is an error on our partners side.
+                if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+                    balance.dispute(*amount)?;
+                    println!("{}: dispute amount: {}, total: {}", transaction.client, amount, balance.total());
+                }
+                else {
+                    println!("transaction ID {} not found for customer {}", transaction.tx, transaction.client);
+                }
+            },
+            TransactionType::Resolve => {
+                // Funds that were previously disputed are no longer disputed. 
+                // This means that the clients held funds should decrease by the amount no longer disputed,
+                // their available funds should increase by the amount no longer disputed                
+                if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+                    balance.resolve(*amount)?;
+                }
+            },
+            TransactionType::ChargeBack => {
+                // A chargeback is the final state of a dispute and represents the client reversing a transaction. 
+                // Funds that were held have now been withdrawn. This means that the clients held funds and total funds 
+                // should decrease by the amount previously disputed.
+                if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+                    balance.chargeback(*amount)?;
+                }
+            },
         }
 
         Ok(())
