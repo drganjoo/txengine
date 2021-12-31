@@ -26,7 +26,7 @@ pub enum TransactionType {
 }
 
 pub trait Transaction {
-    fn apply(&self, balance: &mut ClientBalance);
+    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()>;
 }
 
 impl ClientBalance {
@@ -60,30 +60,79 @@ impl Deposit {
 }
 
 impl Transaction for Deposit {
-    fn apply(&self, balance: &mut ClientBalance) {
+    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()> {
         // meaning it should increase the available and total funds of the client account
         // not sure what to do in case of locked accounts?
+        if balance.locked {
+            return Err("Cannot deposit into a locked account".into());
+        }
+
         balance.available += self.amount;
+        Ok(())
     }
 }
 
 
+pub struct Withdrawal { 
+    client: ClientId, 
+    tx : TransactionId, 
+    amount: f32 
+}
+
+impl Withdrawal {
+    pub fn new(client : ClientId, tx : TransactionId, amount : f32) -> Self{
+        Withdrawal {
+            client : client,
+            tx: tx,
+            amount: amount
+        }
+    }
+}
+
+impl Transaction for Withdrawal {
+    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()>{
+        // meaning it should decrease the available and total funds of the client account
+        // If a client does not have sufficient available funds the withdrawal should fail and the total amount of funds should not change
+        if balance.available < self.amount {
+            return Err("Balance is less than the requested withdrawal amount".into());
+        }
+
+        balance.available -= self.amount;
+        Ok(())
+    }
+}
 
 struct ClientLedger {
     // ordered hashmap is what we need here
     transactions : HashMap<TransactionId, Box<dyn Transaction>>
+    balance: ClientBalance
+}
+
+impl ClientLedger {
+    pub fn new() -> Self {
+        ClientLedger {
+            transactions : HashMap::new(),
+            balance : ClientBalance::new()
+        }
+    }
 }
 
 
-struct TransactionEngine {
+pub struct TransactionEngine {
     ledger: HashMap<ClientId, ClientLedger>
 }
 
 impl TransactionEngine {
-    // fn deposit(tx : Transaction) {
-    //     // meaning it should increase the available and total funds of the client account
-    // }
-    
+    pub fn new() -> Self {
+        TransactionEngine {
+            ledger : HashMap::new()
+        }
+    }
+
+    fn apply(&mut self, transaction : dyn Transaction) {
+        if ledger.get(transaction.)
+    }
+
     // fn withdraw(tx : Transaction){
     //     // meaning it should decrease the available and total funds of the client account
     //     // If a client does not have sufficient available funds the withdrawal should fail and the total amount of funds should not change

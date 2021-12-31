@@ -4,7 +4,7 @@ use std::path::Path;
 mod payment;
 mod readers;
 
-use payment::Transaction;
+use payment::{Transaction, TransactionEngine};
 use readers::{CsvFileReader};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -14,8 +14,10 @@ fn process_reader<T>(transcactions : T)
     where
     T : Iterator<Item = Box<dyn Transaction>> 
 {
+    let engine = TransactionEngine::new();
+
     for t in transcactions {
-        
+        engine.apply(t);
     }
 }
 
