@@ -1,5 +1,5 @@
 use std::{env};
-use std::path::Path;
+use std::io;
 
 mod payment;
 mod readers;
@@ -10,15 +10,19 @@ use readers::{CsvFileReader};
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn process_reader<T>(transcactions : T)
+fn process_reader<T>(transcactions : T) -> TransactionEngine
     where
-    T : Iterator<Item = Box<dyn Transaction>> 
+    T : Iterator<Item = Transaction> 
 {
-    let engine = TransactionEngine::new();
+    let mut engine = TransactionEngine::new();
 
     for t in transcactions {
-        engine.apply(t);
+        if let Err(e) = engine.apply(t) {
+            eprintln!("Error in applying transaction, {}", e);
+        }
     }
+
+    engine
 }
 
 fn filename_from_args() -> Result<String> {
@@ -29,9 +33,20 @@ fn filename_from_args() -> Result<String> {
     return Err("Missing file name to process".into());
 }
 
+fn write_balances(engine : &TransactionEngine) -> Result<()> {
+    let mut writer = csv::Writer::from_writer(io::stdout());
+    
+    for balance in engine.iter() {
+        writer.serialize(balance)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let mut reader = CsvFileReader::new(&filename_from_args()?)?;
-    process_reader(reader.iter());
+    let engine = process_reader(reader.iter());
+    write_balances(&engine)?;
 
     return Ok(());
 }

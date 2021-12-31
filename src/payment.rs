@@ -1,126 +1,171 @@
+use core::ops::DerefMut;
+use core::ops::Add;
+use core::ops::{SubAssign, Deref, AddAssign};
 use std::collections::HashMap;
+use std::fmt;
+use serde::ser::{Serializer, SerializeStruct};
+use serde::{Serialize};
 
 pub type ClientId = u16;
 pub type TransactionId = u32;
 
-// pub enum Transaction {
-//     Deposit { client: u16, tx : u32, amount: f32 },
-//     Withdraw { client: u16, tx : u32, amount: f32 },
-//     Dispute { client: u16, disputed_tx : u32 },
-//     Resolve { client: u16, disputed_tx : u32 },
-//     ChargeBack { client: u16, disputed_tx : u32 },
-// }
-
-struct ClientBalance {
-    available : f32,
-    held : f32,
-    locked : bool
-}
-
+#[derive(Debug)]
 pub enum TransactionType {
-    Deposit,
-    Withdraw,
-    Dispute,
+    Deposit { amount: Amount },
+    Withdrawal { amount: Amount },
+    Dispute, 
     Resolve,
     ChargeBack,
 }
 
-pub trait Transaction {
-    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()>;
+#[derive(Debug)]
+pub struct Transaction {
+    client : ClientId,
+    tx : TransactionId,
+    txn_type : TransactionType
+}
+
+impl Transaction {
+    pub fn new(client : ClientId, id : TransactionId, transaction_type : TransactionType) -> Self {
+        Transaction {
+            client : client,
+            tx : id,
+            txn_type : transaction_type
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialOrd)]
+pub struct Amount(f32);
+
+impl Amount {
+    pub fn new(init : f32) -> Amount {
+        Amount(init)
+    }
+}
+
+impl fmt::Display for Amount {
+    fn fmt(&self, fmt : &mut std::fmt::Formatter<'_>) -> fmt::Result { 
+        let formatted = format!("{:.4}", **self);
+        fmt.write_str(&formatted)?;
+        Ok(())
+    }
+}
+
+impl Add for Amount {
+    type Output = Amount;
+    fn add(self, rhs: Amount) -> Self::Output { 
+        Amount(*self + *rhs)
+    }
+}
+
+impl AddAssign for Amount {
+    fn add_assign(&mut self, rhs: Self) {
+        **self += *rhs;
+    }
+}
+
+impl SubAssign for Amount {
+    fn sub_assign(&mut self, rhs: Self) {
+        **self -= *rhs;
+    }
+}
+
+impl PartialEq for Amount {
+    fn eq(&self, rhs: &Amount) -> bool {
+        // two values are same if they match within 4 precision 
+        (**self - **rhs).abs() < 0.0001
+    }
+}
+
+impl Deref for Amount {
+    type Target = f32;
+    fn deref(&self) -> &Self::Target { 
+        let Amount(value) = self;
+        value
+    }
+}
+
+impl DerefMut for Amount {
+    fn deref_mut(&mut self) -> &mut Self::Target { 
+        let Amount(value) = self;
+        value
+    }
+}
+
+impl Serialize for Amount {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[derive(Debug)]
+pub struct ClientBalance {
+    client: ClientId,
+    available : Amount,
+    held : Amount,
+    locked : bool
 }
 
 impl ClientBalance {
-    pub fn new() -> Self {
+    pub fn new(client : ClientId) -> Self {
         ClientBalance {
-            available: 0.0,
-            held: 0.0,
+            client: client,
+            available: Amount(0.0),
+            held: Amount(0.0),
             locked: false,
         }
     }
 
-    pub fn total(&self) -> f32 {
+    pub fn total(&self) -> Amount {
         self.available + self.held
     }
-}
 
-pub struct Deposit { 
-    client: ClientId, 
-    tx : TransactionId, 
-    amount: f32 
-}
-
-impl Deposit {
-    pub fn new(client : ClientId, tx : TransactionId, amount : f32) -> Self{
-        Deposit {
-            client : client,
-            tx: tx,
-            amount: amount
-        }
+    pub fn deposit(&mut self, amount: Amount) {
+        self.available += amount;
     }
 }
 
-impl Transaction for Deposit {
-    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()> {
-        // meaning it should increase the available and total funds of the client account
-        // not sure what to do in case of locked accounts?
-        if balance.locked {
-            return Err("Cannot deposit into a locked account".into());
-        }
+impl Serialize for ClientBalance {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ClientBalance", 5)?;
 
-        balance.available += self.amount;
-        Ok(())
+        state.serialize_field("client", &self.client)?;
+        state.serialize_field("available", &self.available)?;
+        state.serialize_field("held", &self.held)?;
+        state.serialize_field("total", &self.total())?;
+        state.serialize_field("locked", &self.locked)?;
+
+        state.end()
     }
 }
 
-
-pub struct Withdrawal { 
-    client: ClientId, 
-    tx : TransactionId, 
-    amount: f32 
-}
-
-impl Withdrawal {
-    pub fn new(client : ClientId, tx : TransactionId, amount : f32) -> Self{
-        Withdrawal {
-            client : client,
-            tx: tx,
-            amount: amount
-        }
-    }
-}
-
-impl Transaction for Withdrawal {
-    fn apply(&self, balance: &mut ClientBalance) -> crate::Result<()>{
-        // meaning it should decrease the available and total funds of the client account
-        // If a client does not have sufficient available funds the withdrawal should fail and the total amount of funds should not change
-        if balance.available < self.amount {
-            return Err("Balance is less than the requested withdrawal amount".into());
-        }
-
-        balance.available -= self.amount;
-        Ok(())
-    }
-}
-
+#[derive(Debug)]
 struct ClientLedger {
-    // ordered hashmap is what we need here
-    transactions : HashMap<TransactionId, Box<dyn Transaction>>
+    transactions : HashMap<TransactionId, Amount>,
     balance: ClientBalance
 }
 
 impl ClientLedger {
-    pub fn new() -> Self {
+    pub fn new(client: ClientId) -> Self {
         ClientLedger {
             transactions : HashMap::new(),
-            balance : ClientBalance::new()
+            balance : ClientBalance::new(client)
         }
     }
 }
 
-
+#[derive(Debug)]
 pub struct TransactionEngine {
     ledger: HashMap<ClientId, ClientLedger>
 }
+
 
 impl TransactionEngine {
     pub fn new() -> Self {
@@ -129,39 +174,105 @@ impl TransactionEngine {
         }
     }
 
-    fn apply(&mut self, transaction : dyn Transaction) {
-        if ledger.get(transaction.)
+    pub fn apply(&mut self, transaction : Transaction) -> crate::Result<()> {
+        let mut client_ledger = self.ledger.get_mut(&transaction.client);
+
+        if let None = client_ledger {
+            let new_customer = ClientLedger::new(transaction.client);
+            self.ledger.insert(transaction.client, new_customer);
+
+            client_ledger = self.ledger.get_mut(&transaction.client);
+        }
+
+        if let Some(ledger) = client_ledger {
+            if ledger.balance.locked {
+                return Err("Customer account is locked and transaction cannot be applied".into());
+            }
+
+            return TransactionEngine::apply_transaction(ledger, &transaction);
+        }
+
+        Err("Customer ledger not found".into())
     }
 
-    // fn withdraw(tx : Transaction){
-    //     // meaning it should decrease the available and total funds of the client account
-    //     // If a client does not have sufficient available funds the withdrawal should fail and the total amount of funds should not change
-    // }
+    fn apply_transaction(ledger : &mut ClientLedger, transaction: &Transaction) -> crate::Result<()> {
+        let balance = &mut ledger.balance;
 
-    // fn dispute(tx: Transaction) {
-    //     // This means that the clients available funds should decrease by the amount disputed, their held funds 
-    //     // should increase by the amount disputed, while their total funds should remain the same.
-    //     // Notice that a dispute does not state the amount disputed. Instead a dispute references the transaction that is disputed by ID
+        match &transaction.txn_type {
+            TransactionType::Deposit { amount } => {
+                balance.deposit(*amount);
 
-    //     // If the tx specified by the dispute doesn't exist you can ignore it and assume this is an error on our partners side.
-    // }
+                ledger.transactions.insert(transaction.tx, *amount);
+                println!("{}: deposited: {}, total: {}", transaction.client, amount, balance.total());
+            },
+            _ => {
 
-    // fn resolve(tx : Transaction) {
-    //     // A resolve represents a resolution to a dispute, releasing the associated held funds. Funds that were 
-    //     // previously disputed are no longer disputed. This means that the clients held funds should decrease by 
-    //     // the amount no longer disputed, their available funds should increase by the amount no longer disputed, 
-    //     // and their total funds should remain the same.
+            }
+            // TransactionType::Withdrawal { amount } => {
+            //     if balance.available < amount {
+            //         return Err("Balance is less than the requested withdrawal amount".into());
+            //     }
 
-    //     // If the tx specified doesn't exist, or the tx isn't under dispute, you can ignore the resolve 
-    //     // and assume this is an error on our partner's side.
-    // }
+            //     balance.available -= amount;
+            //     ledger.transactions.insert(transaction.tx, amount);
+            //     println!("{}: withdrawal: {}, total: {}", transaction.client, amount, balance.total());
+            // },
+            // TransactionType::Dispute => {
+            //     // If the tx specified by the dispute doesn't exist you can ignore it and 
+            //     // assume this is an error on our partners side.
+            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+            //         // that the clients available funds should decrease by the amount disputed, 
+            //         // their held funds should increase by the amount disputed,
+            //         balance.available -= *amount;
+            //         balance.held += *amount;
 
-    // fn charge_back(tx: Transaction) {
-    //     // This means that the clients held funds and total funds should decrease by the amount previously disputed. 
-    //     // If a chargeback occurs the client's account should be immediately frozen.
+            //         println!("{}: dispute amount: {}, total: {}", transaction.client, amount, balance.total());
+            //     }
+            //     else {
+            //         println!("transaction ID {} not found for customer {}", transaction.tx, transaction.client);
+            //     }
+            // },
+            // TransactionType::Resolve => {
+            //     // Funds that were previously disputed are no longer disputed. 
+            //     // This means that the clients held funds should decrease by the amount no longer disputed,
+            //     // their available funds should increase by the amount no longer disputed                
+            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+            //         balance.available += *amount;
+            //         balance.held -= *amount;
+            //     }
+            // },
+            // TransactionType::ChargeBack => {
+            //     // A chargeback is the final state of a dispute and represents the client reversing a transaction. 
+            //     // Funds that were held have now been withdrawn. This means that the clients held funds and total funds 
+            //     // should decrease by the amount previously disputed.
+            //     if let Some(amount) = ledger.transactions.get(&transaction.tx) {
+            //         balance.held -= *amount;
+            //         balance.locked = true;
+            //     }
+            // },
+        }
 
-    //     // Like a resolve, if the tx specified doesn't exist, or the tx isn't under dispute, you can ignore chargeback 
-    //     // and assume this is an error on our partner's side.
-//    }
+        Ok(())
+    }
+
+    pub fn iter(&self) -> ClientIterator<'_> {
+        ClientIterator {
+            iter : self.ledger.iter()
+        }
+    }
+}
+
+
+pub struct ClientIterator<'a> {
+    iter : std::collections::hash_map::Iter<'a, ClientId, ClientLedger>
+}
+
+impl<'a> Iterator for ClientIterator<'a> {
+    type Item = &'a ClientBalance;
+    
+    fn next(&mut self) -> Option<Self::Item> { 
+        let (_, client_ledger) = &self.iter.next()?;
+        Some(&client_ledger.balance)
+    }
 }
 

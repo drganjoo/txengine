@@ -1,7 +1,6 @@
 use csv::{Reader, StringRecordsIter, StringRecord};
-use std::path::Path;
 use std::fs::File;
-use crate::payment::{Transaction, Deposit, Withdrawal, ClientId, TransactionId};
+use crate::payment::{Transaction, TransactionType, ClientId, TransactionId, Amount};
 
 pub struct CsvFileReader {
     reader : Reader<File>,
@@ -16,7 +15,7 @@ pub struct CsvFileIterator<'a> {
 // impl Drop for CsvFileReader {
 // }
 
-impl<'a> CsvFileReader {
+impl CsvFileReader {
     pub fn new(path : &String) -> crate::Result<Self> {
         let rdr = csv::Reader::from_path(path)?;
         Ok(
@@ -35,73 +34,72 @@ impl<'a> CsvFileReader {
 }
 
 impl<'a> Iterator for CsvFileIterator<'a> {
-    type Item = Box<dyn Transaction>;
+    type Item = Transaction;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_result = self.records.next()?;
         match next_result {
-            Ok(next_record) => {
+            Ok(record) => {
                 self.line_no += 1;
 
-                let result : crate::Result<Box<dyn Transaction>> = match &next_record[0] {
-                    "deposit" => {
-                        parse_deposit(&next_record)
-                    },
-                    "withdrawal" => {
-                        parse_nonref_record(&next_record, Withdrawal::new)
-                    },
-                    invalid_type => {
-                        Err(format!("An invalid type of record '{}' is presnet in CSV file.", invalid_type).into())
-                    }
-                };
+                if record.len() < 2 {
+                    eprintln!("Deposit record does not have enough parts");
+                    return None;
+                }
+            
+                let result = parse_line(&record);
 
                 match result {
                     Ok(transaction) => {
                         return Some(transaction);
                     },
                     Err(e) => {
-                        println!("Line #: {}, {}", self.line_no, e);
+                        eprintln!("Line #: {}, {}", self.line_no, e);
                         return None;
                     }
                 }
             },
-            Err(e) => {
+            Err(_) => {
+                // the file has ended?
                 return None;
             }
         }
     }
 }
 
-fn parse_deposit(record : &StringRecord) -> crate::Result<Box<dyn Transaction>> {
-    if record.len() < 4 {
-        return Err("Deposit record does not have enough parts".into());
-    }
-
+fn parse_line(record: &StringRecord) -> crate::Result<Transaction> {
     let client : ClientId = record[1].trim().parse()?;
     let tx : TransactionId = record[2].trim().parse()?;
-    let amount : f32 = record[3].trim().parse()?;
 
+    let result = match &record[0] {
+        "deposit" => {
+            Transaction::new(client, tx, TransactionType::Deposit { amount: parse_amount(&record)? })
+        },
+        "withdrawal" => {
+            Transaction::new(client, tx, TransactionType::Withdrawal { amount: parse_amount(&record)? })
+        },
+        "dispute" => {
+            Transaction::new(client, tx, TransactionType::Dispute)
+        },
+        "resolve" => {
+            Transaction::new(client, tx, TransactionType::Resolve)
+        },
+        "chargeback" => {
+            Transaction::new(client, tx, TransactionType::ChargeBack)
+        },
+        invalid_type => {
+            return Err(format!("An invalid type of record '{}' is presnet in CSV file.", invalid_type).into())
+        }
+    };
+
+    Ok(result)
+}
+
+fn parse_amount(record : &StringRecord) -> crate::Result<Amount> {
+    let amount : f32 = record[3].trim().parse()?;
     if amount < 0.0 {
         return Err("Deposit amounts cannot be negative".into());
     }
 
-    Ok(Box::new(Deposit::new(client, tx, amount)))
-}
-
-fn parse_nonref_record<T : 'static>(record : &StringRecord, type_creator : impl Fn(ClientId, TransactionId, f32) -> T) -> crate::Result<Box<dyn Transaction>> 
-    where T : Transaction + Sync + Send
-{
-    if record.len() < 4 {
-        return Err("Record does not have enough parts".into());
-    }
-
-    let client : ClientId = record[1].trim().parse()?;
-    let tx : TransactionId = record[2].trim().parse()?;
-    let amount : f32 = record[3].trim().parse()?;
-
-    if amount < 0.0 {
-        return Err("Amount cannot be negative".into());
-    }
-
-    Ok(Box::new(type_creator(client, tx, amount)))
+    Ok(Amount::new(amount))
 }
