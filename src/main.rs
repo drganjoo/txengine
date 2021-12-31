@@ -1,15 +1,10 @@
 use std::{env};
 use std::io;
 
-mod payment;
 mod readers;
 
-use payment::transaction::{Transaction};
-use payment::TransactionEngine;
+use txnengine::transaction::{Transaction, TransactionEngine};
 use readers::{CsvFileReader};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
 
 fn process_reader<T>(transcactions : T) -> TransactionEngine
     where
@@ -26,7 +21,7 @@ fn process_reader<T>(transcactions : T) -> TransactionEngine
     engine
 }
 
-fn filename_from_args() -> Result<String> {
+fn filename_from_args() -> txnengine::Result<String> {
     if let Some(file_name) = env::args().nth(1) {
         return Ok(file_name);
     }
@@ -34,7 +29,7 @@ fn filename_from_args() -> Result<String> {
     return Err("Missing file name to process".into());
 }
 
-fn write_balances(engine : &TransactionEngine) -> Result<()> {
+fn write_balances(engine : &TransactionEngine) -> txnengine::Result<()> {
     let mut writer = csv::Writer::from_writer(io::stdout());
     
     for balance in engine.iter() {
@@ -44,7 +39,7 @@ fn write_balances(engine : &TransactionEngine) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() -> txnengine::Result<()> {
     let mut reader = CsvFileReader::new(&filename_from_args()?)?;
     let engine = process_reader(reader.iter());
     write_balances(&engine)?;

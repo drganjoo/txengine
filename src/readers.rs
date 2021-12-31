@@ -1,14 +1,14 @@
 use csv::{Reader, DeserializeRecordsIter};
 use std::fs::File;
 
-use crate::payment::transaction::{Transaction};
+use txnengine::transaction::{Transaction};
 
 pub struct CsvFileReader {
     reader : Reader<File>,
 }
 
 impl CsvFileReader {
-    pub fn new(path : &String) -> crate::Result<Self> {
+    pub fn new(path : &String) -> txnengine::Result<Self> {
         let rdr = csv::Reader::from_path(path)?;
         Ok(
             CsvFileReader {
