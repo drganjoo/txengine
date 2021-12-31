@@ -1,15 +1,3 @@
-//! ClientBalance
-//!
-//! Type [`ClientBalance`] holds the current balance of a client
-//! 
-//! |Field|Description|
-//! |-|-|
-//! |client|The Id of the client|
-//! |available|Amount that is available for the client|
-//! |held|Amount that has been disputed|
-//! |locked|If a chargeback is transacted, the account is locked|
-//! |total()|Gives the total amount that is available for the client|
-
 use std::collections::HashMap;
 use serde::ser::{Serializer, SerializeStruct};
 use serde::{Serialize};
@@ -17,6 +5,103 @@ use std::fmt;
 
 use super::{ClientId, TransactionId, Transaction, TransactionType};
 use super::amount::Amount;
+
+/// `ClientLedger` keeps record of past deposit / withdrawal transactions
+/// of a client and the current balance of the account
+#[derive(Debug)]
+pub struct ClientLedger {
+    transactions : HashMap<TransactionId, Amount>,
+    balance: ClientBalance
+}
+
+impl ClientLedger {
+    pub fn new(client: ClientId) -> Self {
+        ClientLedger {
+            transactions : HashMap::new(),
+            balance : ClientBalance::new(client)
+        }
+    }
+
+    pub fn get_balance_mut(&mut self) -> &mut ClientBalance {
+        &mut self.balance
+    }
+
+    pub fn get_balance(&self) -> &ClientBalance {
+        &self.balance
+    }
+
+    /// All deposit / withdrawals are remembered for future dispute and
+    /// resolutions
+    pub fn record_transaction(&mut self, transaction : &Transaction) {
+        match transaction.txn_type {
+            TransactionType::Deposit { amount } => {
+                self.transactions.insert(transaction.tx, amount);
+            },
+            TransactionType::Withdrawal { amount } => {
+                self.transactions.insert(transaction.tx, amount);
+            }
+            _ => {
+                // nothing to record for any other type of transaction
+            }
+        }
+    }
+
+    pub fn get_past_transaction(&self, id : TransactionId) -> Option<&Amount> {
+        self.transactions.get(&id)
+    }
+
+    /// All transactions to the customer account are applied using `apply_transaction`
+    /// 
+    pub fn apply_transaction(&mut self, transaction: &Transaction) -> crate::Result<()> {
+        match &transaction.txn_type {
+            TransactionType::Deposit { amount } => {
+                self.balance.deposit(*amount)?;
+            },
+            TransactionType::Withdrawal { amount } => {
+                self.balance.withdrawal(*amount)?;
+            },
+            TransactionType::Dispute => {
+                // If the tx specified by the dispute doesn't exist you can ignore it and 
+                // assume this is an error on our partners side.
+                if let Some(amount) = self.transactions.get(&transaction.tx) {
+                    self.balance.dispute(*amount)?;
+                }
+            },
+            TransactionType::Resolve => {
+                // Funds that were previously disputed are no longer disputed. 
+                // This means that the clients held funds should decrease by the amount no longer disputed,
+                // their available funds should increase by the amount no longer disputed                
+                if let Some(amount) = self.transactions.get(&transaction.tx) {
+                    self.balance.resolve(*amount)?;
+                }
+            },
+            TransactionType::ChargeBack => {
+                // A chargeback is the final state of a dispute and represents the client reversing a transaction. 
+                // Funds that were held have now been withdrawn. This means that the clients held funds and total funds 
+                // should decrease by the amount previously disputed.
+                if let Some(amount) = self.transactions.get(&transaction.tx) {
+                    self.balance.chargeback(*amount)?;
+                }
+            },
+        }
+
+        self.record_transaction(transaction);
+
+        Ok(())
+    }
+}
+
+/// `ClientBalance`
+///
+/// Type [`ClientBalance`] holds the current balance of a client
+/// 
+/// |Field|Description|
+/// |-|-|
+/// |client|The Id of the client|
+/// |available|Amount that is available for the client|
+/// |held|Amount that has been disputed|
+/// |locked|If a chargeback is transacted, the account is locked|
+/// |total()|Gives the total amount that is available for the client|
 
 #[derive(Debug)]
 pub struct ClientBalance {
@@ -149,86 +234,8 @@ impl Serialize for ClientBalance {
 
 // todo: write a Deserializer for ClientBalance
 
-
-#[derive(Debug)]
-pub struct ClientLedger {
-    transactions : HashMap<TransactionId, Amount>,
-    balance: ClientBalance
-}
-
-impl ClientLedger {
-    pub fn new(client: ClientId) -> Self {
-        ClientLedger {
-            transactions : HashMap::new(),
-            balance : ClientBalance::new(client)
-        }
-    }
-
-    pub fn get_balance_mut(&mut self) -> &mut ClientBalance {
-        &mut self.balance
-    }
-
-    pub fn get_balance(&self) -> &ClientBalance {
-        &self.balance
-    }
-
-    pub fn record_transaction(&mut self, transaction : &Transaction) {
-        match transaction.txn_type {
-            TransactionType::Deposit { amount } => {
-                self.transactions.insert(transaction.tx, amount);
-            },
-            TransactionType::Withdrawal { amount } => {
-                self.transactions.insert(transaction.tx, amount);
-            }
-            _ => {
-                // nothing to record for any other type of transaction
-            }
-        }
-    }
-
-    pub fn get_past_transaction(&self, id : TransactionId) -> Option<&Amount> {
-        self.transactions.get(&id)
-    }
-
-    pub fn apply_transaction(&mut self, transaction: &Transaction) -> crate::Result<()> {
-        match &transaction.txn_type {
-            TransactionType::Deposit { amount } => {
-                self.balance.deposit(*amount)?;
-            },
-            TransactionType::Withdrawal { amount } => {
-                self.balance.withdrawal(*amount)?;
-            },
-            TransactionType::Dispute => {
-                // If the tx specified by the dispute doesn't exist you can ignore it and 
-                // assume this is an error on our partners side.
-                if let Some(amount) = self.transactions.get(&transaction.tx) {
-                    self.balance.dispute(*amount)?;
-                }
-            },
-            TransactionType::Resolve => {
-                // Funds that were previously disputed are no longer disputed. 
-                // This means that the clients held funds should decrease by the amount no longer disputed,
-                // their available funds should increase by the amount no longer disputed                
-                if let Some(amount) = self.transactions.get(&transaction.tx) {
-                    self.balance.resolve(*amount)?;
-                }
-            },
-            TransactionType::ChargeBack => {
-                // A chargeback is the final state of a dispute and represents the client reversing a transaction. 
-                // Funds that were held have now been withdrawn. This means that the clients held funds and total funds 
-                // should decrease by the amount previously disputed.
-                if let Some(amount) = self.transactions.get(&transaction.tx) {
-                    self.balance.chargeback(*amount)?;
-                }
-            },
-        }
-
-        self.record_transaction(transaction);
-
-        Ok(())
-    }
-}
-
+/// `LedgerError` represents all errors that might occur in
+/// applying transactions
 #[derive(Debug)]
 pub enum LedgerError {
     InsufficentFunds { available: Amount, requested: Amount },
