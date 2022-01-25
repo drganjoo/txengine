@@ -72,12 +72,16 @@ client, available, held, total, locked
 
 ## Solution Overview
 
-Each line in the CSV is iterated over by `CsvFileReader` type, which uses `csv::Reader` 
-to iterate and apply line by line. Each line is converted into a `Transaction` type 
-by using serde::Deserializer.
+From the engine's prespective, it does not matter whether data is coming from a CSV file, a database or from the network. All
+it needs is an iterative way of going over the data.
 
-In the end, all customer balances are iterated over by using the `iter` function of 
-`TransactionEngine` type and outputing using `serde::Serialize` and `csv::Writer`.
+For this reason, `main::process_reader`, takes an iterator of incoming transactions and applies each of them to the `TransactionEngine`.
+
+Each line in the CSV is represented by the type `Transaction`. The rest of the program does not deal with individual csv lines.
+
+`CsvFileReader` type processes the csv and it provides an `iter()` function to get an iterator that returns `Iterator<Type = Transaction>` type. Internally, it uses `csv::Reader` to iterate and apply line by line. Each line is converted into a `Transaction` type by using serde::Deserializer.
+
+The transaction engine keeps all customer balances using `CustomerLedger` type. The `iter` method provides an `Iterator<Type=CustomerLedger` to get the customer balances. To write the ouput, `serde::Serialize` and `csv::Writer` are used.
 
 ### TransactionEngine
 
