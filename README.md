@@ -13,7 +13,45 @@ The program expects one argument, the csv file that has the transactions in it:
 ```
 cargo run -- simple.csv
 ```
-## Overview
+
+## Sample Project
+
+Given a CSV representing a series of transactions, this sample processes the payments crediting and debiting accounts. After processing the complete set of payments output the client account balances
+
+The input file is the only argument to the binary.
+
+A precision of four places past the decimal is guaranteed through out the program.
+
+### Input
+
+The input will be a CSV file with the columns 
+
+type, client, tx, and amount. 
+
+The type is a string, the client column is a valid u16 client ID, the tx is a valid u32 transaction ID, and the amount is a decimal value with a precision of up to four places past the decimal.
+
+For example type, deposit, deposit, deposit, withdrawal, withdrawal,
+
+client, 1, 2, 1, 1, 2,
+tx, amount 1, 1.0 2, 2.0 3, 2.0 4, 1.5 5, 3.0
+
+Output
+
+The output should be a list of client IDs (client), available amounts (available), held amounts (held), total amounts (total), and whether the account is locked (locked). Columns are defined as
+
+### Types of Transactions
+
+Deposit: A deposit is a credit to the client's asset account
+
+Withdrawal: A withdraw is a debit to the client's asset account
+
+Dispute: A dispute represents a client's claim that a transaction was erroneous and should be reversed. The transaction shouldn't be reversed yet but the associated funds should be held. 
+
+Resolve: A resolve represents a resolution to a dispute, releasing the associated held funds. Funds that were previously disputed are no longer disputed.
+
+Chargeback: A chargeback is the final state of a dispute and represents the client reversing a transaction. Funds that were held have now been withdrawn.
+
+## Solution Overview
 
 Each line in the CSV is iterated over by `CsvFileReader` type, which uses `csv::Reader` 
 to iterate and apply line by line. Each line is converted into a `Transaction` type 
@@ -42,7 +80,7 @@ This is used for keeping the current balance of the customer
 
 ## Testing
 
-A very few test cases have been written which can be run using the following command:
+A few test cases have been written which can be run using the following command:
 
 ```
 cargo test
