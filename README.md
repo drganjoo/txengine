@@ -30,26 +30,45 @@ type, client, tx, and amount.
 
 The type is a string, the client column is a valid u16 client ID, the tx is a valid u32 transaction ID, and the amount is a decimal value with a precision of up to four places past the decimal.
 
-For example type, deposit, deposit, deposit, withdrawal, withdrawal,
+For example:
 
-client, 1, 2, 1, 1, 2,
-tx, amount 1, 1.0 2, 2.0 3, 2.0 4, 1.5 5, 3.0
+type, client, tx, amount,   
+deposit, 1, 1, 1.0    
+deposit, 2, 2, 2.0    
+deposit, 1, 3, 2.0    
+withdrawal, 1, 4, 1.5    
+withdrawal, 2, 5, 3.0    
 
 Output
 
-The output should be a list of client IDs (client), available amounts (available), held amounts (held), total amounts (total), and whether the account is locked (locked). Columns are defined as
+The output should be a list of client IDs (client), available amounts (available), held amounts (held), total amounts (total), and whether the account is locked (locked). Columns are defined as:
+
+**available**: The total funds that are available for trading, staking, withdrawal, etc. This should be equal to the total - held amounts
+
+**held**: The total funds that are held for dispute. This should be equal to total available amounts
+
+**total**: The total funds that are available or held. This should be equal to available + held
+
+**locked**: Whether the account is locked. An account is locked if a charge back occurs
+
+For example:
+
+client, available, held, total, locked     
+1, 1.5, 0.0, 1.5, false      
+2, 2.0, 0.0, 2.0, false     
+
 
 ### Types of Transactions
 
-Deposit: A deposit is a credit to the client's asset account
+**Deposit**: A deposit is a credit to the client's asset account
 
-Withdrawal: A withdraw is a debit to the client's asset account
+**Withdrawal**: A withdraw is a debit to the client's asset account
 
-Dispute: A dispute represents a client's claim that a transaction was erroneous and should be reversed. The transaction shouldn't be reversed yet but the associated funds should be held. 
+**Dispute**: A dispute represents a client's claim that a transaction was erroneous and should be reversed. The transaction shouldn't be reversed yet but the associated funds should be held. 
 
-Resolve: A resolve represents a resolution to a dispute, releasing the associated held funds. Funds that were previously disputed are no longer disputed.
+**Resolve**: A resolve represents a resolution to a dispute, releasing the associated held funds. Funds that were previously disputed are no longer disputed.
 
-Chargeback: A chargeback is the final state of a dispute and represents the client reversing a transaction. Funds that were held have now been withdrawn.
+**Chargeback**: A chargeback is the final state of a dispute and represents the client reversing a transaction. Funds that were held have now been withdrawn.
 
 ## Solution Overview
 
